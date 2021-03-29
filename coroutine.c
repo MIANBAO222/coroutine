@@ -18,8 +18,8 @@
 struct coroutine;
 
 // 协程调度器
-struct schedule {
-	char stack[STACK_SIZE];
+struct schedule {//初始化见coroutine_open函数，调用malloc为schedule分配空间，由于STACK_SIZE=1024k>128k,采用mmap映射于brk堆上方线性地址
+	char stack[STACK_SIZE];//此处声明协程栈（公有栈，所有协程共用），需要与进程栈相区别
 	ucontext_t main;        // 正在running的协程在执行完后需切换到的上下文，由于是非对称协程，所以该上下文用来接管协程结束后的程序控制权
 	int nco;                // 调度器中已保存的协程数量
 	int cap;                // 调度器中协程的最大容量
@@ -43,14 +43,14 @@ struct coroutine {
 // 创建协程任务(分配内存空间)并初始化
 struct coroutine * 
 _co_new(struct schedule *S , coroutine_func func, void *ud) {
-	struct coroutine * co = malloc(sizeof(*co));
+	struct coroutine * co = malloc(sizeof(*co));//子协程节点指针，
 	co->func = func;                // 初始化协程函数
 	co->ud = ud;                    // 初始化用户数据
 	co->sch = S;                    // 初始化协程所属的调度器
 	co->cap = 0;                    // 初始化协程栈的最大容量
 	co->size = 0;                   // 初始化协程栈的当前容量
 	co->status = COROUTINE_READY;   // 初始化协程状态
-	co->stack = NULL;               // 初始化协程栈
+	co->stack = NULL;               // 初始化协程私有栈（此处用来保存上下文）
 	return co;
 }
 
@@ -64,7 +64,7 @@ _co_delete(struct coroutine *co) {
 // 创建协程调度器schedule
 struct schedule * 
 coroutine_open(void) {
-	struct schedule *S = malloc(sizeof(*S));              // 从堆上为调度器分配内存空间
+	struct schedule *S = malloc(sizeof(*S));              // 从堆（此处错误，应该为mmap共享映射区）上为调度器分配内存空间（此处应回看schedule的内容）
 	S->nco = 0;                                           // 初始化调度器的当前协程数量
 	S->cap = DEFAULT_COROUTINE;                           // 初始化调度器的最大协程数量
 	S->running = -1;
@@ -156,7 +156,7 @@ coroutine_resume(struct schedule * S, int id) {
 		swapcontext(&S->main, &C->ctx);         // 保持当前上下文到S->main, 切换当前上下文为C->ctx
 		break;
 	case COROUTINE_SUSPEND:
-		memcpy(S->stack + STACK_SIZE - C->size, C->stack, C->size);  // 拷贝协程栈C->stack到S->stack
+		memcpy(S->stack + STACK_SIZE - C->size, C->stack, C->size);  // 拷贝协程私有栈C->stack到S->stack
 		S->running = id;                       // 设置当前运行的协程id
 		C->status = COROUTINE_RUNNING;         // 修改协程C的状态
 		swapcontext(&S->main, &C->ctx);        // 保存当前上下文到S->main, 切换当前上下文为C->ctx
@@ -179,12 +179,12 @@ _save_stack(struct coroutine *C, char *top) {
 	}
 	
 	C->size = top - &dummy;
-	memcpy(C->stack, &dummy, C->size); // TODO - 不是很明白为什么这种方式可以保存协程栈
+	memcpy(C->stack, &dummy, C->size); // 通过拷贝公用协程栈已经使用的部分并拷贝到私有栈达到保存上下文的功能
 }
 
 // 保存上下文后中断当前协程的执行,然后由调度器中的main上下文接管程序执行权
 void
-coroutine_yield(struct schedule * S) {
+coroutine_yield(struct schedule * S) {//由于没有时间片调度算法，所有只有一个协程执行完成或者协程主动放弃才会重新调度
 	int id = S->running;
 	assert(id >= 0);
 	struct coroutine * C = S->co[id];
