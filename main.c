@@ -25,8 +25,8 @@ test(struct schedule *S) {
 	int co2 = coroutine_new(S, foo, &arg2);//创建协程2，此时未运行
 	printf("main start\n");
 	while (coroutine_status(S,co1) && coroutine_status(S,co2)) {
-		coroutine_resume(S,co1);
-		coroutine_resume(S,co2);
+		coroutine_resume(S,co1);//coroutine_resume是协程恢复执行入口
+		coroutine_resume(S,co2);//coroutine_resume是协程恢复执行入口
 	} 
 	printf("main end\n");
 }
